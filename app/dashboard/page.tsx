@@ -120,17 +120,23 @@ export default function DashboardPage() {
   const loadLedger = useCallback(async () => {
     if (!userId) return;
     setLoadingLedger(true);
+
     const { data, error } = await supabase
       .from('credit_ledger')
       .select('delta, reason, meta, created_at, id')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(50);
+
+    // ✅ STRICT TS FIX (NO behavior change): ensure `data` is treated as CreditLedgerEntry[]
+    const rows: CreditLedgerEntry[] = (data ?? []) as CreditLedgerEntry[];
+
     if (!error && data) {
-      setLedger(data);
-      const bal = data.reduce((sum, row) => sum + row.delta, 0);
+      setLedger(rows);
+      const bal = rows.reduce((sum, row) => sum + row.delta, 0);
       setBalance(bal);
     }
+
     setLoadingLedger(false);
   }, [userId, supabase]);
 
