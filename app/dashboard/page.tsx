@@ -101,7 +101,7 @@ export default function DashboardPage() {
     if (error) {
       addToast('Failed to load leads', 'error');
     } else {
-      setLeads(data ?? []);
+      setLeads((data ?? []) as Lead[]);
     }
     setLoadingLeads(false);
   }, [userId, supabase, addToast]);
@@ -112,6 +112,7 @@ export default function DashboardPage() {
       .from('lead_access')
       .select('lead_id')
       .eq('user_id', userId);
+
     if (!error && data) {
       setEntitlementSet(buildEntitlementSet(data));
     }
@@ -128,10 +129,9 @@ export default function DashboardPage() {
       .order('created_at', { ascending: false })
       .limit(50);
 
-    // ✅ STRICT TS FIX (NO behavior change): ensure `data` is treated as CreditLedgerEntry[]
     const rows: CreditLedgerEntry[] = (data ?? []) as CreditLedgerEntry[];
 
-    if (!error && data) {
+    if (!error) {
       setLedger(rows);
       const bal = rows.reduce((sum, row) => sum + row.delta, 0);
       setBalance(bal);
@@ -142,22 +142,30 @@ export default function DashboardPage() {
 
   const loadMetrics = useCallback(async () => {
     const { data } = await supabase.from('dashboard_metrics').select('*').single();
-    if (data) setMetrics(data);
+    if (data) setMetrics(data as DashboardMetrics);
+
     const { data: sb } = await supabase
       .from('stage_breakdown')
       .select('*')
       .order('company_count', { ascending: false });
-    if (sb) setStageBreakdown(sb);
+
+    if (sb) setStageBreakdown(sb as StageBreakdown[]);
   }, [supabase]);
 
   const checkAdmin = useCallback(async () => {
     if (!userId) return;
-    const { data } = await supabase
+
+    const { data, error } = await supabase
       .from('user_profiles')
       .select('role')
       .eq('id', userId)
       .single();
-    if (data?.role === 'admin') setIsAdmin(true);
+
+    const profile = data as { role: string } | null;
+
+    if (!error && profile?.role === 'admin') {
+      setIsAdmin(true);
+    }
   }, [userId, supabase]);
 
   useEffect(() => {
@@ -169,19 +177,23 @@ export default function DashboardPage() {
     checkAdmin();
   }, [userId, loadLeads, loadEntitlements, loadLedger, loadMetrics, checkAdmin]);
 
-  // Unlock handler
   const handleUnlock = useCallback(async () => {
     if (!accessToken || selectedIds.size === 0) return;
+
     const newCount = computeNewClaimCount(Array.from(selectedIds), entitlementSet);
+
     if (newCount === 0) {
       addToast('All selected leads are already unlocked — re-download is free.', 'info');
       return;
     }
+
     if (balance < newCount) {
       addToast(`Insufficient tokens. Need ${newCount}, have ${balance}.`, 'error');
       return;
     }
+
     setUnlocking(true);
+
     try {
       const res = await fetch('/api/unlock', {
         method: 'POST',
@@ -191,9 +203,16 @@ export default function DashboardPage() {
         },
         body: JSON.stringify({ leadIds: Array.from(selectedIds) }),
       });
+
       const json = await res.json();
+
       if (!res.ok) throw new Error(json.error || 'Unlock failed');
-      addToast(`Unlocked ${json.newly_unlocked} leads. Balance: ${json.balance_after} tokens.`, 'success');
+
+      addToast(
+        `Unlocked ${json.newly_unlocked} leads. Balance: ${json.balance_after} tokens.`,
+        'success'
+      );
+
       await Promise.all([loadEntitlements(), loadLedger()]);
     } catch (err: unknown) {
       addToast(err instanceof Error ? err.message : 'Unlock failed', 'error');
@@ -202,16 +221,15 @@ export default function DashboardPage() {
     }
   }, [accessToken, selectedIds, entitlementSet, balance, addToast, loadEntitlements, loadLedger]);
 
-  // CSV download
   const handleDownloadCSV = useCallback(() => {
     const selectedLeads = leads.filter((l) => selectedIds.has(l.id));
     if (selectedLeads.length === 0) return;
+
     const csv = generateCSV(selectedLeads, entitlementSet);
     downloadCSV(csv, `vm-leads-${new Date().toISOString().slice(0, 10)}.csv`);
     addToast(`Exported ${selectedLeads.length} leads to CSV.`, 'success');
   }, [leads, selectedIds, entitlementSet, addToast]);
 
-  // Sign out
   const handleSignOut = useCallback(async () => {
     await supabase.auth.signOut();
     router.replace('/');
@@ -242,11 +260,9 @@ export default function DashboardPage() {
         <Sidebar activePanel={activePanel} onSelect={setActivePanel} />
 
         <main className="flex-1 overflow-auto">
-          {/* Metrics bar */}
           <MetricsBar metrics={metrics} darkMode={darkMode} />
 
           <div className="flex flex-col xl:flex-row gap-5 p-5 pt-4 min-h-0">
-            {/* Left column */}
             <div className="flex flex-col gap-5 xl:w-72 shrink-0">
               <BalanceCard
                 balance={balance}
@@ -255,14 +271,9 @@ export default function DashboardPage() {
                 totalLeads={leads.length}
                 darkMode={darkMode}
               />
-              <TransactionsPanel
-                ledger={ledger}
-                loading={loadingLedger}
-                darkMode={darkMode}
-              />
+              <TransactionsPanel ledger={ledger} loading={loadingLedger} darkMode={darkMode} />
             </div>
 
-            {/* Main content */}
             <div className="flex-1 min-w-0">
               <LeadBrowser
                 leads={maskedLeads}
@@ -282,7 +293,6 @@ export default function DashboardPage() {
         </main>
       </div>
 
-      {/* Toasts */}
       <div className="fixed bottom-5 right-5 flex flex-col gap-2 z-50">
         {toasts.map((t) => (
           <Toast key={t.id} message={t.message} variant={t.variant} />
